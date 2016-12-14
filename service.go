@@ -1,54 +1,57 @@
-// Package log implements spec.Log. This logger interface is to simply log
-// output to gather runtime information.
-package log
+// Package logger implements github.com/the-anna-project/logger.Service. This
+// logger interface is to simply log output to gather runtime information.
+package logger
 
-import servicespec "github.com/the-anna-project/spec/service"
+import (
+	"os"
+	"time"
 
-// New creates a new log service.
-func New() servicespec.LogService {
-	return &service{}
+	kitlog "github.com/go-kit/kit/log"
+
+	microerror "github.com/giantswarm/microkit/error"
+)
+
+// Config represents the configuration used to create a new logger service.
+type Config struct {
+	// Settings.
+	TimestampFormatter kitlog.Valuer
+}
+
+// DefaultConfig provides a default configuration to create a new logger service
+// by best effort.
+func DefaultConfig() Config {
+	return Config{
+		// Settings.
+		TimestampFormatter: func() interface{} {
+			return time.Now().UTC().Format("06-01-02 15:04:05.000")
+		},
+	}
+}
+
+// New creates a new configured logger service.
+func New(config Config) (Service, error) {
+	// Settings.
+	if config.TimestampFormatter == nil {
+		return nil, microerror.MaskAnyf(invalidConfigError, "timestamp formatter must not be empty")
+	}
+
+	kitLogger := kitlog.NewJSONLogger(kitlog.NewSyncWriter(os.Stdout))
+	kitLogger = kitlog.NewContext(kitLogger).With(
+		"ts", config.TimestampFormatter,
+		"caller", kitlog.DefaultCaller,
+	)
+
+	newLogger := &service{
+		logger: kitLogger,
+	}
+
+	return newLogger, nil
 }
 
 type service struct {
-	// Dependencies.
-
-	// rootLogger is the underlying logger actually logging messages.
-	rootLogger        servicespec.RootLogger
-	serviceCollection servicespec.ServiceCollection
-
-	// Settings.
-
-	metadata map[string]string
+	logger Service
 }
 
-func (s *service) Boot() {
-	id, err := s.Service().ID().New()
-	if err != nil {
-		panic(err)
-	}
-	s.metadata = map[string]string{
-		"id":   id,
-		"name": "log",
-		"type": "service",
-	}
-}
-
-func (s *service) Line(v ...interface{}) {
-	s.rootLogger.Log(v...)
-}
-
-func (s *service) Metadata() map[string]string {
-	return s.metadata
-}
-
-func (s *service) Service() servicespec.ServiceCollection {
-	return s.serviceCollection
-}
-
-func (s *service) SetRootLogger(rl servicespec.RootLogger) {
-	s.rootLogger = rl
-}
-
-func (s *service) SetServiceCollection(sc servicespec.ServiceCollection) {
-	s.serviceCollection = sc
+func (s *service) Log(v ...interface{}) error {
+	return s.logger.Log(v...)
 }
